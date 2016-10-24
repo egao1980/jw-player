@@ -1,0 +1,556 @@
+<link rel="import" href="../polymer/polymer.html">
+<link rel="import" href="../iron-image/iron-image.html">
+
+<!--
+`jw-player` encapsulates the JWPlayer player into a web component.
+
+    <jw-player
+      url="..."
+      height="270px"
+      width="480px"
+      rel="0"
+      start="5"
+      autoplay="1">
+    </jw-player>
+
+`jw-player` supports all of the [embedded player parameters](https://developers.google.com/JWPlayer/player_parameters). Each can be set as an attribute on `jw-player`.
+
+The standard set of [JWPlayer player events](https://developers.google.com/JWPlayer/iframe_api_reference#Events) are exposed, as well as methods for playing, pausing, seeking to a specific time, and loading a new video.
+
+@demo
+-->
+<dom-module id="jw-player">
+  <style>
+    :host {
+      display: block;
+      background: #000;
+    }
+
+    :host([fluid]) {
+      width: 100%;
+      max-width: 100%;
+      position: relative;
+    }
+
+    :host([fluid]) iframe,
+    :host([fluid]) #thumbnail {
+      vertical-align: bottom;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #container {
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    #thumbnail {
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+    }
+  </style>
+
+  <template>
+    <div id="container" style$="{{_computeContainerStyle(width, height)}}">
+      <template is="dom-if" if="{{_showThumbnail}}">
+        <template is="dom-if" if="{{thumbnail}}">
+          <iron-image
+                  id="thumbnail"
+                  src="{{thumbnail}}"
+                  sizing="contain"
+                  placeholder="{{_placeholder}}"
+                  title="[[title]]"
+                  alt="[[title]]"
+                  on-tap="_handleThumbnailTap"></iron-image>
+        </template>
+        <template is="dom-if" if="{{!thumbnail}}">
+          <iron-image
+                  id="thumbnail"
+                  src="{{_placeholder}}"
+                  sizing="contain"
+                  title="[[title]]"
+                  alt="[[title]]"
+                  on-tap="_handleThumbnailTap"></iron-image>
+        </template>
+      </template>
+
+      <div id="video"></div>
+    </div>
+  </template>
+</dom-module>
+
+<script>
+  Polymer({
+    is: 'jw-player',
+    /**
+     * Fired when the JWPlayer player is fully initialized and ready for use.
+     *
+     * @event jw-player-ready
+     */
+
+    /**
+     * Fired when the state of the player changes. `e.detail.data` is set to one of
+     * [the documented](https://developers.google.com/JWPlayer/iframe_api_reference#onStateChange)
+     * states.
+     *
+     * @event jw-player-state-change
+     * @param {Object} e Event parameters.
+     */
+
+    /**
+     * Fired when playback fails due to an error. `e.detail.data` is set to one of
+     * [the documented](https://developers.google.com/JWPlayer/iframe_api_reference#onError)
+     * error codes.
+     *
+     * @event jw-player-error
+     * @param {Object} e Event parameters.
+     */
+
+    properties: {
+      playerId: {
+        type: String,
+        value: "player"
+      },
+
+      /**
+       * Sets the id of the video to play. Changing this attribute will trigger a call
+       * to load a new video into the player (if `this.autoplay` is set to `1` and `playsupported` is true)
+       * or cue a new video otherwise.
+       *
+       * You can [search for videos programmatically](https://developers.google.com/JWPlayer/v3/docs/search/list)
+       * using the JWPlayer Data API, or just hardcode known video ids to display on your page.
+       */
+      url: {
+        type: String,
+        value: '',
+      },
+
+      mediaId: {
+        type: String,
+        value: ""
+      },
+
+      /**
+       * "1" if video should start automatically
+       */
+      autoplay: {
+        type: Boolean,
+        value: false
+      },
+      /**
+       * Whether playback has started.
+       *
+       * This defaults to `false` and is set to `true` once the first 'playing' event is fired by
+       * the underlying JWPlayer Player API.
+       *
+       * Once set to `true`, it will remain that way indefinitely.
+       * Paused/buffering/ended events won't cause `playbackstarted` to reset to `false`.
+       * Nor will loading a new video into the player.
+       */
+      playbackstarted: {
+        type: Boolean,
+        value: false,
+        notify: true
+      },
+
+      /**
+       * Sets the height of the player on the page.
+       * Accepts anything valid for a CSS measurement, e.g. '200px' or '50%'.
+       * If the unit of measurement is left off, 'px' is assumed.
+       */
+      height: {
+        type: String,
+        value: '270px'
+      },
+
+      /**
+       * Sets the width of the player on the page.
+       * Accepts anything valid for a CSS measurement, e.g. '200px' or '50%'.
+       * If the unit of measurement is left off, 'px' is assumed.
+       */
+      width: {
+        type: String,
+        value: '480px'
+      },
+
+      /**
+       * Exposes the current player state.
+       * Using this attribute is an alternative to listening to `jw-player-state-change` events,
+       * and can simplify the logic in templates with conditional binding.
+       */
+      state: {
+        type: String,
+        value: 'idle',
+        notify: true
+      },
+
+      /**
+       * Exposes the current playback time, in seconds.
+       *
+       * You can divide this value by the `duration` to determine the playback percentage.
+       */
+      currenttime: {
+        type: Number,
+        value: 0,
+        notify: true
+      },
+
+      /**
+       * Exposes the video duration, in seconds.
+       *
+       * You can divide the `currenttime` to determine the playback percentage.
+       *
+       * @attribute duration
+       * @type number
+       */
+      duration: {
+        type: Number,
+        value: 1, // To avoid divide-by-zero errors if used before video is cued.
+        notify: true
+      },
+
+      /**
+       * Exposes the current playback time, formatted as a (HH:)MM:SS string.
+       */
+      currenttimeformatted: {
+        type: String,
+        value: '0:00',
+        notify: true
+      },
+
+      /**
+       * Exposes the video duration, formatted as a (HH:)MM:SS string.
+       */
+      durationformatted: {
+        type: String,
+        value: '0:00', // To avoid divide-by-zero errors if used before video is cued.
+        notify: true
+      },
+
+      /**
+       * The fraction of the bytes that have been loaded for the current video, in the range [0-1].
+       */
+      fractionloaded: {
+        type: Number,
+        value: 0,
+        notify: true
+      },
+
+      chromeless: {
+        type: Boolean,
+        value: false
+      },
+      /**
+       * The URL of an image to use as a custom thumbnail.
+       */
+      thumbnail: {
+        type: String,
+        value: ''
+      },
+
+      title: {
+        type: String,
+        value: ''
+      },
+
+      /**
+       * If `fluid` is set, then the player will set its width to 100% to fill
+       * the parent container, while adding `padding-top` to preserve the
+       * aspect ratio provided by `width` and `height`. If `width` and `height`
+       * have not been set, the player will fall back to a 16:9 aspect ratio.
+       * This is useful for responsive designs where you don't want to
+       * introduce letterboxing on your video.
+       */
+      fluid: {
+        type: Boolean,
+        value: false
+      },
+      _placeholder: {
+        type: String,
+        value: 'data:image/png;base64,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'
+      },
+
+      _showThumbnail: {
+        type: Boolean,
+        value: true
+      }
+
+
+    },
+
+    _computeContainerStyle: function (width, height) {
+      return 'width:' + width + '; height:' + height;
+    },
+
+    _useExistingPlaySupportedValue: function () {
+      this.playsupported = this._playsupportedLocalStorage;
+    },
+
+    observers: ['_urlChanged(url,playerId)'],
+
+    /**
+     * Sets fluid width/height.
+     *
+     * If the fluid attribute is set, the aspect ratio of the video will
+     * be inferred (if set in pixels), or assumed to be 16:9. The element
+     * will give itself enough top padding to force the player to use the
+     * correct aspect ratio, even as the screen size changes.
+     *
+     */
+    ready: function () {
+      if (this.hasAttribute('fluid')) {
+        var ratio = parseInt(this.height, 10) / parseInt(this.width, 10);
+        if (isNaN(ratio)) {
+          ratio = 9 / 16;
+        }
+        ratio *= 100;
+        this.width = '100%';
+        this.height = 'auto';
+        this.style['padding-top'] = ratio + '%';
+      }
+    },
+
+    /**
+     * Clean up the underlying Player `<iframe>` when we're removed from the DOM.
+     */
+    detached: function () {
+      this.autoplay = false;
+      this._showThumbnail = true;
+      if (this._player) {
+        this._player.stop();
+        this._player.remove();
+      }
+    },
+
+    /**
+     * Plays the current video.
+     *
+     * Note that on certain mobile browsers, playback
+     * [can't be initiated programmatically](https://developers.google.com/JWPlayer/iframe_api_reference#Mobile_considerations).
+     *
+     * If `this.playsupported` is not `true`, calling `play()` will have no effect.
+     *
+     * @method play
+     */
+    play: function () {
+      if (this._player && this._player.play) {
+        this._player.play(true);
+      }
+    },
+
+    /**
+     * Modifies the volume of the current video.
+     *
+     * Developers should take care not to break expected user experience by programmatically
+     * modifying the volume on mobile browsers.
+     * Note that the JWPlayer player, in addition, does not display volume controls in a
+     * mobile environment.
+     *
+     * @method setVolume
+     * @param {number} volume The new volume, an integer between 0 (muted) and 100 (loudest).
+     */
+    setVolume: function (volume) {
+      if (this._player && this._player.setVolume) {
+        this._player.setVolume(volume);
+      }
+    },
+
+    /**
+     * Mutes the current video.
+     *
+     * Developers should take care not to break expected user experience by programmatically
+     * modifying the volume on mobile browsers.
+     * Note that the JWPlayer player, in addition, does not display volume controls in a
+     * mobile environment.
+     *
+     * @method mute
+     */
+    mute: function () {
+      if (this._player && this._player.setMute) {
+        this._player.setMute(true);
+      }
+    },
+
+    /**
+     * Unmutes the current video.
+     *
+     * Developers should take care not to break expected user experience by programmatically
+     * modifying the volume on mobile browsers.
+     * Note that the JWPlayer player, in addition, does not display volume controls in a
+     * mobile environment.
+     *
+     * @method unMute
+     */
+    unMute: function () {
+      if (this._player && this._player.setMute) {
+        this._player.setMute(false);
+      }
+    },
+
+    /**
+     * Pauses the current video.
+     *
+     * @method pause
+     */
+    pause: function () {
+      if (this._player && this._player.pause) {
+        this._player.pause(true);
+      }
+    },
+
+    /**
+     * Skips ahead (or back) to the specified number of seconds.
+     *
+     * @method seekTo
+     * @param {number} seconds Number of seconds to seek to.
+     */
+    seekTo: function (seconds) {
+      if (this._player && this._player.seek) {
+        this._player.seek(seconds);
+
+        // Explicitly call _updatePlaybackStats() to ensure that the new playback info is
+        // reflected in the bound attributes.
+        // The 100ms delay is somewhat arbitrary, but the JWPlayer player does need time to
+        // update its internal state following the call to player.seekTo().
+        this.async(function () {
+          this._updatePlaybackStats();
+        }, null, 100);
+      }
+    },
+
+    _urlChanged: function (url, playerId) {
+      this.currenttime = 0;
+      this.currenttimeformatted = this._toHHMMSS(0);
+      this.fractionloaded = 0;
+      this.duration = 1;
+      this.durationformatted = this._toHHMMSS(0);
+      this.detached();
+      var videoDiv = document.createElement('div');
+      videoDiv.id = playerId;
+      var videoContainer = this.$.video;
+      if (videoContainer.hasChildNodes()) {
+        videoContainer.replaceChild(videoDiv, videoContainer.childNodes[0]);
+      } else {
+        videoContainer.appendChild(videoDiv);
+      }
+      this._player = jwplayer(videoDiv);
+    },
+
+    _player: null,
+    __updatePlaybackStatsInterval: null,
+    _pendingUrl: '',
+
+    _apiLoad: function () {
+      this._player.setup({
+        file: this.url,
+        mediaid: this.mediaId,
+        width: this.width,
+        height: this.height,
+        autostart: this.autoplay
+      });
+
+      this._player.on('ready', function (e) {
+        if (this._pendingUrl && this._pendingUrl != this.url) {
+          this._player.cueVideoById(this._pendingUrl);
+          this._pendingUrl = '';
+        }
+
+        this.fire('jw-player-ready', e);
+      }.bind(this));
+
+      this._player.on('ready', function (e) {
+        if (this._pendingUrl && this._pendingUrl != this.url) {
+          this._player.cueVideoById(this._pendingUrl);
+          this._pendingUrl = '';
+        }
+
+        this.fire('jw-player-ready', e);
+      }.bind(this));
+
+      this._player.on('play', function (e) {
+        this.state = 'play';
+        this.playbackstarted = true;
+        this.duration = this._player.getDuration();
+        this.durationformatted = this._toHHMMSS(this.duration);
+
+        if (!this.__updatePlaybackStatsInterval) {
+          this.__updatePlaybackStatsInterval = setInterval(this._updatePlaybackStats.bind(this), 1000);
+        }
+        this.fire('jw-player-state-change', e);
+      }.bind(this));
+
+      var stateHandler = function (e) {
+        this.state = this._player.getState();
+        // We only need to update the stats if the video is playing.
+        if (this.__updatePlaybackStatsInterval) {
+          clearInterval(this.__updatePlaybackStatsInterval);
+          this.__updatePlaybackStatsInterval = null;
+        }
+
+        if (this.state == 'paused') {
+          this.set('autoplay', false);
+        }
+
+        this.fire('jw-player-state-change', e);
+      }.bind(this);
+
+      this._player.on('pause', stateHandler);
+      this._player.on('idle', stateHandler);
+      this._player.on('buffer', stateHandler);
+      this._player.on('complete', stateHandler);
+
+      this._player.on('error', function (e) {
+        // Set the player state to 0 ('ended'), since playback will have stopped.
+        this.state = 'idle';
+
+        this.fire('jw-player-error', e);
+      }.bind(this));
+    },
+
+    _updatePlaybackStats: function () {
+      this.currenttime = Math.round(this._player.getPosition());
+      this.currenttimeformatted = this._toHHMMSS(this.currenttime);
+      this.fractionloaded = this._player.getBuffer() / 100.0;
+    },
+
+    _toHHMMSS: function (totalSeconds) {
+      var hours = Math.floor(totalSeconds / 3600);
+      totalSeconds -= hours * 3600;
+      var minutes = Math.floor(totalSeconds / 60);
+      var seconds = Math.round(totalSeconds - (minutes * 60));
+
+      var hourPortion = '';
+      if (hours > 0) {
+        hourPortion += hours + ':';
+
+        if (minutes < 10) {
+          minutes = '0' + minutes;
+        }
+      }
+
+      if (seconds < 10) {
+        seconds = '0' + seconds;
+      }
+
+      return hourPortion + minutes + ':' + seconds;
+    },
+
+    _handleThumbnailTap: function () {
+      this.autoplay = true;
+      this.set('_showThumbnail', false);
+      if (this.fluid) {
+        this.style['padding-top'] = 0;
+      }
+
+      this.async(function () {
+        this._apiLoad();
+      }, null, 10);
+
+    }
+  });
+</script>
+

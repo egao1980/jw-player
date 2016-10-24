@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head>
+    <title>jw-player demo</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1, user-scalable=yes">
+    <script src="../../webcomponentsjs/webcomponents-lite.js"></script>
+
+    <link rel="import" href="../../iron-demo-helpers/demo-pages-shared-styles.html">
+    <link rel="import" href="../../iron-demo-helpers/demo-snippet.html">
+
+    <link rel="import" href="../jw-player.html">
+
+    <style is="custom-style" include="demo-pages-shared-styles">
+
+    </style>
+  </head>
+  <body>
+    <script src="//content.jwplatform.com/libraries/MjOwdjDb.js"></script>
+    <div class="vertical-section-container centered">
+      <h3>Basic jw-player Demo</h3>
+      <demo-snippet>
+        <template>
+          <jw-player
+                  fluid
+                  title="Demo video"
+                  url="https://www.youtube.com/watch?v=gCb_JEzo7xg"
+                  thumbnail="https://i.ytimg.com/vi/gCb_JEzo7xg/hqdefault.jpg"
+          ></jw-player>
+        </template>
+      </demo-snippet>
+    </div>
+
+  </body>
+</html>
